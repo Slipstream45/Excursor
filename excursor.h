@@ -3,29 +3,27 @@ getdents()
        The system call getdents() reads several linux_dirent structures
        from the directory referred to by the open file descriptor fd
        into the buffer pointed to by dirp.  The argument count specifies
-       the size of that buffer.
+       the size of that buffer.*/
 
-       The linux_dirent structure is declared as follows:
+       //The linux_dirent structure is declared as follows:
 
-           struct linux_dirent {
-               unsigned long  d_ino;     /* Inode number */
-               unsigned long  d_off;     /* Offset to next linux_dirent */
-               unsigned short d_reclen;  /* Length of this linux_dirent */
-               char           d_name[];  /* Filename (null-terminated) */
-                                 /* length is actually (d_reclen - 2 -
-                                    offsetof(struct linux_dirent, d_name)) */
-               /*
-               char           pad;       // Zero padding byte
-               char           d_type;    // File type (only since Linux
-                                         // 2.6.4); offset is (d_reclen - 1)
-               */
+          /* struct linux_dirent {
+               unsigned long  d_inode;     Inode number
+               unsigned long  d_offset;     Offset to next linux_dirent
+               unsigned short d_reclen;  Length of this linux_dirent
+               char           d_name[];  /Filename (null-terminated)
+                                 	length is actually (d_reclen - 2 -
+                                    offsetof(struct linux_dirent, d_name))
+               
+               char           pad;       	Zero padding byte
+               char           d_type;    	File type (only since Linux 2.6.4); offset is 							(d_reclen - 1)
+               
            }
 
        d_ino is an inode number.  d_off is the distance from the start
        of the directory to the start of the next linux_dirent.  d_reclen
        is the size of this entire linux_dirent.  d_name is a null-
-       terminated filename.
-*/
+       terminated filename.*/
 struct linux_dirent {
         unsigned long   d_ino;
         unsigned long   d_off;
